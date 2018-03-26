@@ -1,36 +1,81 @@
-<?
-	$pluginData[snviprog][type] = 'sn';
-	$pluginData[snviprog][name] = 'پرداخت آنلاين';
-	$pluginData[snviprog][uniq] = 'sn';
-	$pluginData[snviprog][description] = 'سرويس پرداخت آنلاين savano';
-	$pluginData[snviprog][author][name] = 'sn';
-	$pluginData[snviprog][author][url] = 'https://www.savano.co.ir';
-	$pluginData[snviprog][author][email] = 'support@savano.ir';
-
-	$pluginData[snviprog][field][config][1][title] = 'API';
-	$pluginData[snviprog][field][config][1][name] = 'MID';
-
-	function gateway__snviprog($data)
-	{
-		global $config,$smarty,$db;
-		$midkey = $data[MID];
-		$price = $data[price]/10;//
-        $callback = $data[callback];
-		$order_id= $data[invoice_id];
+<?php
+$pluginData[sn][type] = 'payment';
+$pluginData[sn][name] = 'پرداخت آنلاين';
+$pluginData[sn][uniq] = 'sn';
+$pluginData[sn][description] = 'اتصال به درگاه اختصاصي';
+$pluginData[sn][author][name] = 'sn';
+$pluginData[sn][author][url] = 'freer.ir';
+$pluginData[sn][author][email] = 'info@domain.com';
 
 
+$pluginData[sn][field][config][1][title] = 'API';
+$pluginData[sn][field][config][1][name] = 'merchant';
+$pluginData[sn][field][config][2][title] = 'ارسال موارد اختیاری خریدار به وب سرویس/ از گزینه ON OFF برای فعال و غیر فعال کردن این گزینه استفاده نمایید';
+$pluginData[sn][field][config][2][name] = 'webservice';
+
+//-- تابع انتقال به دروازه پرداخت
+function gateway__sn($data)
+{
+global $config,$db,$smarty,$pay;
+$merchantID = trim($data[merchant]);
+$amount = ceil($data[amount]/10);
+$invoice_id = $data[invoice_id];
+
+						// Security
+						@session_start();
+						$sec = uniqid();
+						$md = md5($sec.'vm');
+						// Security
+						$callBackUrl = $data[callback]."&check={$md}&sec={$sec}";
 
 
-	$data_string = json_encode(array(
-					'pin'=> $midkey,
-					'price'=> $price,
-					'callback'=>$callback ,
-					'order_id'=> $order_id,
+			$sql2 = "SELECT * FROM `payment` WHERE `payment_rand` = {$invoice_id} LIMIT 1;";
+			$pay = $db->fetch($sql2);
+
+						if ($data[webservice] == 'ON'){
+
+                     $Email=$pay['payment_email'];
+                     $Mobile=$pay['payment_mobile'];
+                     $Description="پرداخت فاکتور به شماره : ".$invoice_id ;
+						    
+				    if($Email==''){$Email='0'; }
+				     if($Paymenter==''){$Paymenter='0';}
+				      if($Mobile==''){$Mobile='0';}
+				       if($Description==''){$Description='0';}
+				       
+					   	$data_string = json_encode(array(
+					'pin'=> $merchantID,
+					'price'=> $amount,
+					'callback'=>$callBackUrl ,
+					'order_id'=> $invoice_id,
+					'email'=> $Email,
+					'description'=> $Description,
+					'name'=> $Paymenter,
+					'mobile'=> $Mobile,
 					'ip'=> $_SERVER['REMOTE_ADDR'],
 					'callback_type'=>2
 					));
+				    
+			        }
+					else
+					{
+					   	$data_string = json_encode(array(
+					'pin'=> $merchantID,
+					'price'=> $amount,
+					'callback'=>$callBackUrl ,
+					'order_id'=> $invoice_id,
+					'email'=> '0',
+					'description'=> $Description,
+					'name'=> '0',
+					'mobile'=> '0',
+					'ip'=> $_SERVER['REMOTE_ADDR'],
+					'callback_type'=>2
+					));
+					    
+					}
 
-	$ch = curl_init('https://developerapi.net/api/v1/request');
+
+			$ch = curl_init('https://developerapi.net/api/v1/request');
 			curl_setopt($ch, CURLOPT_POSTFIELDS, $data_string);
 			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 			curl_setopt($ch, CURLOPT_HTTPHEADER, array(
@@ -42,8 +87,8 @@
 			$result = curl_exec($ch);
 			curl_close($ch);
 			$json = json_decode($result,true);
-
-			$res=$json['result'];
+			
+													$res=$json['result'];
 	                 switch ($res) {
 						    case -1:
 						    $msg = "پارامترهای ارسالی برای متد مورد نظر ناقص یا خالی هستند . پارمترهای اجباری باید ارسال گردد";
@@ -112,60 +157,83 @@
 						       $msg = $josn['result'];
 						}
 
+$query = 'SELECT * FROM `config` WHERE `config_id` = "1" LIMIT 1';
+$conf = $db->fetch($query);
 
+					if(!empty($json['result']) AND $json['result'] == 1)
+					{
+						$_SESSION[$sec] = [
+						'price'=>$amount ,
+						'order_id'=>$invoice_id ,
+						'au'=>$json['au'] ,
+					];
+ 	
+$update[payment_res_num] = $json['au'];
+$sql = $db->queryUpdate('payment', $update, 'WHERE `payment_rand` = "'.$invoice_id.'" LIMIT 1;');
+$db->execute($sql);
 
-
-
-        if($json['result']==1)
-		{
 		echo ('<div style="display:none">'.$json['form'].'</div>Please wait ... <script language="javascript">document.payment.submit(); </script>');
 			exit;	
-		}
-		else
-		{
-		//-- نمایش خطا
-		$data[title] = 'خطای سیستم';
-		$data[message] = '<font color="red">خطا در ارتباط با بانک</font> شماره خطا: '.$msg.'<br /><a href="index.php" class="button">بازگشت</a>';
-		throw new Exception($json['msg'] );
-		}
-	}
+}
+else
+{
+$data[title] = 'خطای سیستمی';
+$data[message] = '<font color="red">خطا در اتصال به ساوانو</font>'.$msg.'<a href="index.php" class="button">بازگشت</a>';
+$smarty->assign('config', $conf);
+$smarty->assign('data', $data);
+$smarty->assign('pay', $payment);
+$smarty->display('message.tpl');
+exit;
+}
+}
 
-	//-- تابع بررسی وضعیت پرداخت
-	function callback__snviprog($data)
+
+function callback__sn($data)
+{
+	if(empty($_GET['sec']) or empty($_GET['check']))
 	{
-		global $db,$post;
+		$output[status] = 0;
+        $output[message]= 'مشکل در وریفای تراکنش !!!!';
+		return $output;
+	}	
+	
+	
+	// Security
+$sec=$_GET['sec'];
+$mdback = md5($sec.'vm');
+$mdurl=$_GET['check'];
+// Security
+	
+	if($mdback == $mdurl)
+	{
+		
+		//get data from session
+		$transData = $_SESSION[$sec];
+		
+		
+global $db;
+$order_id = preg_replace('/[^0-9]/','',$_GET['order_id']);
+$sql = "SELECT * FROM `payment` WHERE `payment_rand` = {$order_id} LIMIT 1;";
+$payment = $db->fetch($sql);
+if ($payment[payment_status] == 1)
+{
+	
 
-
-		$order_id = $_POST['order_id'];
-		$trans_id = $_POST['trans_id'];
-		$midkey = $data['MID'];
-
-
-		$sql = 'SELECT * FROM `payment` WHERE `payment_rand` = ? LIMIT 1;';
-		$sql = $db->prepare($sql);
-		$sql->execute(array (
-            $order_id
-		));
-
-		$payment 	= $sql->fetch();
-
-		if ($payment[payment_status] == 1)
-		{
-			$price = $payment[payment_amount];
-			///////////////////
-
+			$merchantID = trim($data[merchant]);
+			$amount = $transData['price']; 
 			$bank_return = $_POST + $_GET ;
-
-            $data_string = json_encode(array (
-			'pin' => $midkey,
-			'price' => $price/10,
+			
+			$au=$transData['au']; 
+			
+			$data_string = json_encode(array (
+			'pin' => $merchantID,
+			'price' => $amount,
 			'order_id' => $order_id,
-			'au' => $trans_id,
+			'au' => $au,
 			'bank_return' =>$bank_return,
 			));
 
-            	
-            $ch = curl_init('https://developerapi.net/api/v1/verify');
+			$ch = curl_init('https://developerapi.net/api/v1/verify');
 			curl_setopt($ch, CURLOPT_POSTFIELDS, $data_string);
 			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 			curl_setopt($ch, CURLOPT_HTTPHEADER, array(
@@ -177,49 +245,34 @@
 			$result = curl_exec($ch);
 			curl_close($ch);
 
-			//result
+
+                    //result
                     $json = json_decode($result,true);
-
-
-
-
-			$pay = false;
-
-
-            if($json['result']==1){
-				$pay = true;
-			} else {
-				$pay = false;
-			}
-			///////////////////
-
-
-
-
-
-
-
-
-			if($pay)
-			{
-				//-- آماده کردن خروجی
-				$output[status]		= 1;
-				$output[res_num]	= $order_id;
-				$output[ref_num]	= $trans_id;
-				$output[payment_id]	= $payment[payment_id];
-			}
-			else
-			{
-				$output[status]	= 0;
-				$output[message]= 'خطا در پرداخت';
-			}
-		}
-		else
-		{
-			//-- سفارش قبلا پرداخت شده است.
-			$output[status]	= 0;
-			$output[message]= 'این سفارش قبلا پرداخت شده است.';
-		}
-
-		return $output;
-	}
+					
+                    if($json['result'] == 1)
+						
+                   {
+                   //-- آماده کردن خروجی
+                   $output['status'] = 1;
+                   $output['res_num'] = $payment['payment_res_num'];
+                   $output['ref_num'] = $au;
+                   $output['payment_id'] = $payment['payment_id'];
+                   }
+                   else
+                   {
+                   $output[status] = 0;
+                   $output[message]= 'پرداخت انجام نشده است .';
+                   }
+				               
+				   }
+				   else
+				   {
+				   $output[status] = 0;
+				   $output[message]= 'این سفارش قبلا پرداخت شده است.';
+				   }
+					}else{
+					 $output[status] = 0;
+					 $output[message]= 'مشکل در وریفای تراکنش !!!';
+					}
+return $output;
+}
